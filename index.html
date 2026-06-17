@@ -54,6 +54,9 @@ tr:hover td{background:var(--surface2)}
 .payout-row{display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid rgba(30,45,61,0.3);font-size:0.8rem}
 .payout-row:last-child{border-bottom:none}
 .refresh{font-size:0.65rem;color:var(--muted);text-align:right;padding:0.5rem 0}
+.footer-links{text-align:center;padding:1rem;font-size:0.7rem;color:var(--muted)}
+.footer-links a{color:var(--accent);text-decoration:none}
+.footer-links a:hover{text-decoration:underline}
 .error-banner{background:rgba(240,113,120,0.1);border:1px solid var(--red);color:var(--red);padding:0.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:0.8rem;display:none}
 .loading{text-align:center;padding:2rem;color:var(--muted)}
 .loading::after{content:'';animation:dots 1.5s steps(4,end) infinite}
@@ -146,11 +149,11 @@ tr:hover td{background:var(--surface2)}
     </div>
   </div>
 
-  <div class="refresh">Auto-refresh: 60s · Last update: <span id="lastUpdate">--</span> · Node: 50.28.86.131</div>
+  <div class="refresh">Auto-refresh: 60s · Last update: <span id="lastUpdate">--</span> · Node: rustchain.org</div>
 </div>
 
 <script>
-const NODE = 'https://50.28.86.131';
+const NODE = 'https://rustchain.org';
 const REFRESH_MS = 60000;
 let minersData = [];
 
@@ -161,10 +164,12 @@ async function api(path) {
     return await r.json();
   } catch(e) {
     document.getElementById('errorBanner').style.display = 'block';
-    document.getElementById('errorBanner').textContent = 'Node connection error: ' + e.message + ' — is ' + NODE + ' reachable?';
+    document.getElementById('errorBanner').textContent = 'Connection error: ' + e.message;
     return null;
   }
 }
+
+function fmtEpoch(ts) { if (!ts) return '--'; const d = new Date(ts * 1000); return d.toISOString().replace('T',' ').substring(0,19); }
 
 async function refreshAll() {
   document.getElementById('errorBanner').style.display = 'none';
@@ -174,36 +179,41 @@ async function refreshAll() {
     api('/health'), api('/epoch'), api('/api/miners'), api('/payouts.json')
   ]);
 
-  // Node status
   const statusEl = document.getElementById('nodeStatus');
-  if (health && health.status === 'ok') {
-    statusEl.textContent = 'ONLINE';
+  if (health && health.ok) {
+    statusEl.textContent = 'ONLINE v' + (health.version||'?');
     statusEl.className = 'status online';
-    document.getElementById('healthDetails').innerHTML = '<pre style="font-size:0.8rem;color:var(--green)">' +
+    document.getElementById('healthDetails').innerHTML = '<pre style="font-size:0.8rem;color:var(--green);line-height:1.6">' +
+      'Version: ' + (health.version||'?') + '\n' +
+      'Uptime: ' + Math.round((health.uptime_s||0)/3600) + 'h\n' +
+      'DB Read/Write: ' + (health.db_rw?'OK':'FAIL') + '\n' +
+      'Backup Age: ' + Math.round((health.backup_age_hours||0)) + 'h\n' +
+      'Tip Age: ' + (health.tip_age_slots||0) + ' slots\n' +
       JSON.stringify(health, null, 2) + '</pre>';
   } else {
     statusEl.textContent = 'OFFLINE';
     statusEl.className = 'status offline';
-    document.getElementById('healthDetails').innerHTML = '<p style="color:var(--red)">Node unreachable</p>';
   }
 
-  // Epoch
   if (epoch) {
     document.getElementById('epochNum').textContent = '#' + (epoch.epoch || '?');
-    document.getElementById('epochPool').textContent = (epoch.reward_pool || epoch.pool || '?');
-    document.getElementById('epochBar').style.width = (epoch.epoch % 100) + '%';
+    document.getElementById('epochPool').textContent = (epoch.epoch_pot || '?');
+    document.getElementById('epochBar').style.width = (epoch.slot % 100 || 60) + '%';
     document.getElementById('epochDetails').innerHTML =
-      '<pre style="font-size:0.8rem">Epoch: ' + (epoch.epoch||'?') +
-      '\nReward Pool: ' + (epoch.reward_pool||epoch.pool||'?') + ' RTC' +
-      '\nBlock Time: ' + (epoch.block_time||'?') + 's' +
-      '\n</pre>';
+      '<pre style="font-size:0.8rem;line-height:1.8">' +
+      'Epoch: ' + (epoch.epoch||'?') + '\n' +
+      'Reward Pool: ' + (epoch.epoch_pot||'?') + ' RTC\n' +
+      'Blocks per Epoch: ' + (epoch.blocks_per_epoch||'?') + '\n' +
+      'Current Slot: ' + (epoch.slot||'?') + '\n' +
+      'Enrolled Miners: ' + (epoch.enrolled_miners||'?') + '\n' +
+      'Total Supply: ' + Number(epoch.total_supply_rtc||0).toLocaleString() + ' RTC\n' +
+      '</pre>';
   }
 
-  // Miners
-  const miners = Array.isArray(minersRaw) ? minersRaw : (minersRaw?.miners || []);
+  const miners = minersRaw?.miners || [];
   minersData = miners;
-  document.getElementById('activeMiners').textContent = miners.length;
-  const arches = [...new Set(miners.map(m => m.hardware || m.arch || 'unknown'))];
+  document.getElementById('activeMiners').textContent = minersRaw?.pagination?.total_enrolled || miners.length;
+  const arches = [...new Set(miners.map(m => m.hardware_type || 'unknown'))];
   document.getElementById('uniqueArch').textContent = arches.length;
 
   const tbody = document.getElementById('minersTable');
@@ -211,31 +221,31 @@ async function refreshAll() {
     tbody.innerHTML = '<tr><td colspan="5">No active miners</td></tr>';
   } else {
     tbody.innerHTML = miners.map(m => {
-      const id = m.miner_id || m.id || '?';
-      const hw = m.hardware || m.arch || '?';
-      const mult = parseFloat(m.multiplier || m.antiquity_multiplier || 1);
-      const att = m.attestations || m.total_attestations || 0;
-      const seen = (m.last_seen || m.updated_at || '').substring(0, 19);
+      const id = (m.miner || '?').substring(0, 12) + '...';
+      const hw = m.hardware_type || '?';
+      const mult = parseFloat(m.antiquity_multiplier || 1);
+      const att = Math.round(((m.last_attest||0) - (m.first_attest||0)) / 600);
+      const seen = fmtEpoch(m.last_attest);
       let mc = 'mult-low';
-      if (mult >= 2.5) mc = 'mult-high';
-      else if (mult >= 1.5) mc = 'mult-mid';
-      return '<tr><td class="miner-id">' + id + '</td><td><span class="hardware-tag">' + hw + '</span></td>' +
-        '<td class="multiplier ' + mc + '">' + mult.toFixed(1) + 'x</td><td>' + att + '</td><td>' + seen + '</td></tr>';
+      if (mult >= 2.0) mc = 'mult-high';
+      else if (mult >= 1.2) mc = 'mult-mid';
+      const arch = (m.device_arch||m.device_family||'').substring(0,15);
+      return '<tr><td class="miner-id" title="' + (m.miner||'') + '">' + id + '</td>' +
+        '<td><span class="hardware-tag" title="' + (m.device_family||'') + ' ' + (m.device_arch||'') + '">' + hw + '</span></td>' +
+        '<td class="multiplier ' + mc + '">' + mult.toFixed(1) + 'x</td><td>~' + att + '</td><td>' + seen + '</td></tr>';
     }).join('');
   }
 
-  // Payouts
   if (payouts) {
-    document.getElementById('totalPaid').textContent = Number(payouts.total_paid_rtc_exact || 0).toLocaleString() + ' RTC';
+    document.getElementById('totalPaid').textContent = (payouts.total_paid_rtc || '?');
     document.getElementById('totalRecipients').textContent = (payouts.unique_recipients || '?');
     document.getElementById('totalTx').textContent = (payouts.transactions || '?');
     document.getElementById('payoutFeed').innerHTML =
-      '<div class="payout-row"><span>Total Paid</span><strong>' +
-      Number(payouts.total_paid_rtc_exact||0).toLocaleString() + ' RTC</strong></div>' +
+      '<div class="payout-row"><span>Total Paid</span><strong>' + (payouts.total_paid_rtc||'?') + '</strong></div>' +
       '<div class="payout-row"><span>Transactions</span><strong>' + (payouts.transactions||'?') + '</strong></div>' +
-      '<div class="payout-row"><span>Unique Recipients</span><strong>' + (payouts.unique_recipients||'?') + '</strong></div>' +
-      '<div class="payout-row"><span>Last Updated</span><strong>' + (payouts.updated_at||'?') + '</strong></div>' +
-      '<div class="payout-row"><span>Methodology</span><strong>' + (payouts.methodology||'?') + '</strong></div>';
+      '<div class="payout-row"><span>Recipients</span><strong>' + (payouts.unique_recipients||'?') + '</strong></div>' +
+      '<div class="payout-row"><span>Updated</span><strong>' + (payouts.updated_at||'?') + '</strong></div>' +
+      '<div class="payout-row"><span>Methodology</span><strong>' + (payouts.methodology||'?').substring(0,60) + '</strong></div>';
   }
 }
 
@@ -243,19 +253,14 @@ async function lookupWallet() {
   const id = document.getElementById('walletInput').value.trim();
   if (!id) return;
   const result = document.getElementById('walletResult');
-  result.innerHTML = '<span class="loading">Looking up ' + id + '</span>';
-
+  result.innerHTML = '<span style="color:var(--muted)">Looking up ' + id + '...</span>';
   try {
-    const r = await fetch(NODE + '/wallet/balance?miner_id=' + encodeURIComponent(id),
-      {signal: AbortSignal.timeout(10000)});
+    const r = await fetch(NODE + '/wallet/balance?miner_id=' + encodeURIComponent(id), {signal: AbortSignal.timeout(10000)});
     const data = await r.json();
-    const miner = minersData.find(m => (m.miner_id||m.id) === id);
     result.innerHTML = '<div class="card" style="margin:0"><div class="card-value">' +
-      (data.amount_rtc||0) + ' RTC</div><div class="card-sub">Wallet: ' + (data.miner_id||id) +
-      '</div>' + (miner ? '<div class="card-sub">Hardware: ' + (miner.hardware||miner.arch||'?') +
-      ' · Multiplier: ' + (miner.multiplier||miner.antiquity_multiplier||1) + 'x</div>' : '') + '</div>';
+      (data.amount_rtc||0) + ' RTC</div><div class="card-sub">Wallet: ' + (data.miner_id||id) + '</div></div>';
   } catch(e) {
-    result.innerHTML = '<p style="color:var(--red)">Wallet not found or node unreachable</p>';
+    result.innerHTML = '<p style="color:var(--red)">Wallet not found: ' + e.message + '</p>';
   }
 }
 
