@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RustChain Network Dashboard</title>
+<style>
+:root {
+  --bg: #0a0e14;
+  --surface: #131820;
+  --surface2: #1a2230;
+  --border: #1e2d3d;
+  --text: #bfc7d5;
+  --muted: #5c6778;
+  --accent: #ff8f40;
+  --green: #7fd962;
+  --yellow: #ffcc66;
+  --red: #f07178;
+  --blue: #5ccfe6;
+  --purple: #c792ea;
+  --orange: #ff8f40;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono','Fira Code','Cascadia Code',monospace;min-height:100vh}
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.header h1{font-size:1.2rem;color:var(--accent);display:flex;align-items:center;gap:0.5rem}
+.header .status{font-size:0.75rem;padding:0.25rem 0.75rem;border-radius:1rem;background:var(--surface2)}
+.status.online{color:var(--green);border:1px solid var(--green)}
+.status.offline{color:var(--red);border:1px solid var(--red)}
+.status.unknown{color:var(--yellow);border:1px solid var(--yellow)}
+.container{max-width:1400px;margin:0 auto;padding:1.5rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:1.5rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1.25rem;transition:border-color 0.2s}
+.card:hover{border-color:var(--accent)}
+.card-header{display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem}
+.card-header .icon{font-size:1.1rem}
+.card-header h3{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted)}
+.card-value{font-size:1.8rem;font-weight:700;color:var(--accent)}
+.card-sub{font-size:0.75rem;color:var(--muted);margin-top:0.25rem}
+.wide{grid-column:span 2}
+.full{grid-column:1/-1}
+table{width:100%;border-collapse:collapse;font-size:0.8rem}
+th{text-align:left;padding:0.5rem 0.75rem;color:var(--muted);font-weight:400;text-transform:uppercase;font-size:0.7rem;letter-spacing:0.05em;border-bottom:1px solid var(--border)}
+td{padding:0.5rem 0.75rem;border-bottom:1px solid rgba(30,45,61,0.5)}
+tr:hover td{background:var(--surface2)}
+.miner-id{color:var(--accent)}
+.hardware-tag{display:inline-block;padding:0.1rem 0.5rem;border-radius:1rem;font-size:0.7rem;background:var(--surface2);color:var(--blue)}
+.multiplier{font-weight:700}
+.mult-high{color:var(--green)}
+.mult-mid{color:var(--yellow)}
+.mult-low{color:var(--muted)}
+.epoch-bar{height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin-top:0.5rem}
+.epoch-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--yellow));transition:width 1s ease}
+.payout-row{display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid rgba(30,45,61,0.3);font-size:0.8rem}
+.payout-row:last-child{border-bottom:none}
+.refresh{font-size:0.65rem;color:var(--muted);text-align:right;padding:0.5rem 0}
+.error-banner{background:rgba(240,113,120,0.1);border:1px solid var(--red);color:var(--red);padding:0.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:0.8rem;display:none}
+.loading{text-align:center;padding:2rem;color:var(--muted)}
+.loading::after{content:'';animation:dots 1.5s steps(4,end) infinite}
+@keyframes dots{0%{content:'.'}25%{content:'..'}50%{content:'...'}75%{content:'....'}}
+.tabs{display:flex;gap:0;margin-bottom:1rem;border-bottom:1px solid var(--border)}
+.tab{padding:0.5rem 1rem;font-size:0.8rem;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;transition:all 0.2s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.log-line{font-family:monospace;font-size:0.75rem;padding:0.2rem 0;color:var(--muted)}
+.log-line .ts{color:var(--blue)}
+.log-line .event{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>&#9763; RustChain Network Dashboard</h1>
+  <div><span class="status unknown" id="nodeStatus">checking...</span></div>
+</div>
+
+<div class="container">
+  <div class="error-banner" id="errorBanner"></div>
+
+  <div class="grid" id="overview">
+    <div class="card">
+      <div class="card-header"><span class="icon">&#9889;</span><h3>Current Epoch</h3></div>
+      <div class="card-value" id="epochNum">--</div>
+      <div class="card-sub">Reward pool: <span id="epochPool">--</span> RTC</div>
+      <div class="epoch-bar"><div class="epoch-bar-fill" id="epochBar" style="width:60%"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">&#9874;</span><h3>Active Miners</h3></div>
+      <div class="card-value" id="activeMiners">--</div>
+      <div class="card-sub">Across <span id="uniqueArch">--</span> architectures</div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">&#9731;</span><h3>Total RTC Paid</h3></div>
+      <div class="card-value" id="totalPaid">--</div>
+      <div class="card-sub"><span id="totalRecipients">--</span> recipients · <span id="totalTx">--</span> transactions</div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="icon">&#9762;</span><h3>Fee Pool</h3></div>
+      <div class="card-value" id="feePool">--</div>
+      <div class="card-sub">RTC accumulated from transfers</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('miners')">Miners</div>
+    <div class="tab" onclick="switchTab('epochs')">Epoch History</div>
+    <div class="tab" onclick="switchTab('payouts')">Recent Payouts</div>
+    <div class="tab" onclick="switchTab('wallet')">Wallet Lookup</div>
+    <div class="tab" onclick="switchTab('health')">Node Health</div>
+  </div>
+
+  <div class="tab-content active" id="tab-miners">
+    <div class="card full">
+      <table><thead><tr><th>Miner ID</th><th>Hardware</th><th>Multiplier</th><th>Attestations</th><th>Last Seen</th></tr></thead>
+      <tbody id="minersTable"><tr><td colspan="5" class="loading">Loading miners</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-epochs">
+    <div class="card full">
+      <div class="card-header"><h3>Epoch Details</h3></div>
+      <div id="epochDetails" class="loading">Loading epoch data</div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-payouts">
+    <div class="card full">
+      <div class="card-header"><h3>Live Payout Feed</h3></div>
+      <div id="payoutFeed" class="loading">Loading payouts</div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-wallet">
+    <div class="card full">
+      <div class="card-header"><h3>Wallet Lookup</h3></div>
+      <input type="text" id="walletInput" placeholder="Enter miner_id / wallet name" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.75rem;width:100%;border-radius:6px;font-family:monospace;font-size:0.9rem;margin-bottom:1rem" onkeyup="if(event.key==='Enter')lookupWallet()">
+      <button onclick="lookupWallet()" style="background:var(--accent);color:var(--bg);border:none;padding:0.5rem 1.5rem;border-radius:6px;cursor:pointer;font-weight:700;font-family:monospace">Lookup</button>
+      <div id="walletResult" style="margin-top:1rem"></div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-health">
+    <div class="card full">
+      <div id="healthDetails" class="loading">Loading health data</div>
+    </div>
+  </div>
+
+  <div class="refresh">Auto-refresh: 60s · Last update: <span id="lastUpdate">--</span> · Node: 50.28.86.131</div>
+</div>
+
+<script>
+const NODE = 'https://50.28.86.131';
+const REFRESH_MS = 60000;
+let minersData = [];
+
+async function api(path) {
+  try {
+    const r = await fetch(NODE + path, {signal: AbortSignal.timeout(10000)});
+    if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+    return await r.json();
+  } catch(e) {
+    document.getElementById('errorBanner').style.display = 'block';
+    document.getElementById('errorBanner').textContent = 'Node connection error: ' + e.message + ' — is ' + NODE + ' reachable?';
+    return null;
+  }
+}
+
+async function refreshAll() {
+  document.getElementById('errorBanner').style.display = 'none';
+  document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+
+  const [health, epoch, minersRaw, payouts] = await Promise.all([
+    api('/health'), api('/epoch'), api('/api/miners'), api('/payouts.json')
+  ]);
+
+  // Node status
+  const statusEl = document.getElementById('nodeStatus');
+  if (health && health.status === 'ok') {
+    statusEl.textContent = 'ONLINE';
+    statusEl.className = 'status online';
+    document.getElementById('healthDetails').innerHTML = '<pre style="font-size:0.8rem;color:var(--green)">' +
+      JSON.stringify(health, null, 2) + '</pre>';
+  } else {
+    statusEl.textContent = 'OFFLINE';
+    statusEl.className = 'status offline';
+    document.getElementById('healthDetails').innerHTML = '<p style="color:var(--red)">Node unreachable</p>';
+  }
+
+  // Epoch
+  if (epoch) {
+    document.getElementById('epochNum').textContent = '#' + (epoch.epoch || '?');
+    document.getElementById('epochPool').textContent = (epoch.reward_pool || epoch.pool || '?');
+    document.getElementById('epochBar').style.width = (epoch.epoch % 100) + '%';
+    document.getElementById('epochDetails').innerHTML =
+      '<pre style="font-size:0.8rem">Epoch: ' + (epoch.epoch||'?') +
+      '\nReward Pool: ' + (epoch.reward_pool||epoch.pool||'?') + ' RTC' +
+      '\nBlock Time: ' + (epoch.block_time||'?') + 's' +
+      '\n</pre>';
+  }
+
+  // Miners
+  const miners = Array.isArray(minersRaw) ? minersRaw : (minersRaw?.miners || []);
+  minersData = miners;
+  document.getElementById('activeMiners').textContent = miners.length;
+  const arches = [...new Set(miners.map(m => m.hardware || m.arch || 'unknown'))];
+  document.getElementById('uniqueArch').textContent = arches.length;
+
+  const tbody = document.getElementById('minersTable');
+  if (!miners.length) {
+    tbody.innerHTML = '<tr><td colspan="5">No active miners</td></tr>';
+  } else {
+    tbody.innerHTML = miners.map(m => {
+      const id = m.miner_id || m.id || '?';
+      const hw = m.hardware || m.arch || '?';
+      const mult = parseFloat(m.multiplier || m.antiquity_multiplier || 1);
+      const att = m.attestations || m.total_attestations || 0;
+      const seen = (m.last_seen || m.updated_at || '').substring(0, 19);
+      let mc = 'mult-low';
+      if (mult >= 2.5) mc = 'mult-high';
+      else if (mult >= 1.5) mc = 'mult-mid';
+      return '<tr><td class="miner-id">' + id + '</td><td><span class="hardware-tag">' + hw + '</span></td>' +
+        '<td class="multiplier ' + mc + '">' + mult.toFixed(1) + 'x</td><td>' + att + '</td><td>' + seen + '</td></tr>';
+    }).join('');
+  }
+
+  // Payouts
+  if (payouts) {
+    document.getElementById('totalPaid').textContent = Number(payouts.total_paid_rtc_exact || 0).toLocaleString() + ' RTC';
+    document.getElementById('totalRecipients').textContent = (payouts.unique_recipients || '?');
+    document.getElementById('totalTx').textContent = (payouts.transactions || '?');
+    document.getElementById('payoutFeed').innerHTML =
+      '<div class="payout-row"><span>Total Paid</span><strong>' +
+      Number(payouts.total_paid_rtc_exact||0).toLocaleString() + ' RTC</strong></div>' +
+      '<div class="payout-row"><span>Transactions</span><strong>' + (payouts.transactions||'?') + '</strong></div>' +
+      '<div class="payout-row"><span>Unique Recipients</span><strong>' + (payouts.unique_recipients||'?') + '</strong></div>' +
+      '<div class="payout-row"><span>Last Updated</span><strong>' + (payouts.updated_at||'?') + '</strong></div>' +
+      '<div class="payout-row"><span>Methodology</span><strong>' + (payouts.methodology||'?') + '</strong></div>';
+  }
+}
+
+async function lookupWallet() {
+  const id = document.getElementById('walletInput').value.trim();
+  if (!id) return;
+  const result = document.getElementById('walletResult');
+  result.innerHTML = '<span class="loading">Looking up ' + id + '</span>';
+
+  try {
+    const r = await fetch(NODE + '/wallet/balance?miner_id=' + encodeURIComponent(id),
+      {signal: AbortSignal.timeout(10000)});
+    const data = await r.json();
+    const miner = minersData.find(m => (m.miner_id||m.id) === id);
+    result.innerHTML = '<div class="card" style="margin:0"><div class="card-value">' +
+      (data.amount_rtc||0) + ' RTC</div><div class="card-sub">Wallet: ' + (data.miner_id||id) +
+      '</div>' + (miner ? '<div class="card-sub">Hardware: ' + (miner.hardware||miner.arch||'?') +
+      ' · Multiplier: ' + (miner.multiplier||miner.antiquity_multiplier||1) + 'x</div>' : '') + '</div>';
+  } catch(e) {
+    result.innerHTML = '<p style="color:var(--red)">Wallet not found or node unreachable</p>';
+  }
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+refreshAll();
+setInterval(refreshAll, REFRESH_MS);
+</script>
+</body>
+</html>
